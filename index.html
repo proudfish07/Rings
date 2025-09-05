@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>色環腳環查詢｜僅顯示使用中</title>
+  <meta name="description" content="從 Google 試算表讀取資料，顯示各物種目前使用中的色環。滑過顯示個體；可搜尋環號→回覆個體(病歷編號)。" />
+  <!-- 使用系統字體，載入快 -->
+  <style>
+    :root{
+      --bg:#fafafa; --card:#ffffff; --text:#111; --muted:#6b7280; --border:#e5e7eb;
+      --accent:#ff7a00; /* 橘底 */
+      --accentText:#111; /* 黑字 */
+      --radius:16px;
+    }
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", Arial, "PingFang TC", "Microsoft JhengHei", sans-serif;}
+    .container{max-width:1100px;margin:0 auto;padding:24px;}
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:16px;}
+    header h1{font-size:20px;margin:0;}
+    header .note{color:var(--muted);font-size:14px;}
+
+    /* 搜尋列 */
+    .searchbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin: 12px 0 8px;}
+    .searchbar input{flex:1;min-width:220px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:15px;}
+    .btn{padding:10px 14px;border:1px solid var(--border);background:#fff;border-radius:10px;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .search-result{font-size:14px;color:var(--muted);margin-top:4px;min-height:20px}
+    .search-result strong{color:var(--text)}
+
+    /* 物種卡片 */
+    .species-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-top:16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .species-head{display:flex;gap:12px;align-items:baseline;justify-content:space-between;border-bottom:1px dashed var(--border);padding-bottom:8px;margin-bottom:12px}
+    .species-title{font-weight:700}
+    .species-meta{font-size:13px;color:var(--muted)}
+
+    /* Ring Pillar 網格 */
+    .pillars{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px}
+    .pillar{background:var(--accent);color:var(--accentText);border-radius:10px;height:52px;display:flex;align-items:center;justify-content:center;font-weight:700;letter-spacing:.3px;position:relative;box-shadow:0 1px 0 rgba(0,0,0,.08);outline:none;border:1px solid rgba(0,0,0,.06)}
+    .pillar[data-hit="1"]{box-shadow:0 0 0 3px #1111; transform:scale(1.02);} /* 搜尋高亮 */
+
+    /* Tooltip (顯示個體) */
+    .pillar::after{content: attr(data-individual); position:absolute; bottom:60px; left:50%; transform:translateX(-50%); background:#111; color:#fff; padding:6px 8px; font-size:12px; border-radius:8px; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .12s ease; box-shadow:0 2px 10px rgba(0,0,0,.15)}
+    .pillar:hover::after, .pillar:focus-visible::after{opacity:1}
+    .pillar::before{content:""; position:absolute; bottom:52px; left:50%; transform:translateX(-50%); border:6px solid transparent; border-top-color:#111; opacity:0; transition:opacity .12s ease}
+    .pillar:hover::before, .pillar:focus-visible::before{opacity:1}
+
+    footer{color:var(--muted);font-size:12px;margin:24px 0;text-align:center}
+
+    /* RWD */
+    @media (max-width:640px){
+      header{flex-direction:column;align-items:flex-start}
+    }
+  </style>
+  <!-- PapaParse：穩健解析 CSV（支援含逗點欄位） -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js" defer></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>色環腳環查詢 <span class="note">（僅顯示「使用中」）</span></h1>
+      <div class="note">資料來源：Google 試算表（公開匯出 CSV）</div>
+    </header>
+
+    <!-- 搜尋 -->
+    <section aria-label="搜尋環號">
+      <div class="searchbar">
+        <input id="q" type="search" placeholder="輸入環號（例如：I01）" autocomplete="off" />
+        <button id="btnSearch" class="btn">搜尋</button>
+        <button id="btnClear" class="btn" title="清除">清除</button>
+      </div>
+      <div id="searchResult" class="search-result" role="status" aria-live="polite"></div>
+    </section>
+
+    <!-- 內容掛載點 -->
+    <main id="root" aria-busy="true" aria-live="polite"></main>
+
+    <footer>© 2025 WildOne ｜ 本頁於重新整理時即與試算表同步（建議以「發布到網路」的 CSV 連結）</footer>
+  </div>
+
+  <script>
+  // —— ✅ 設定你的 Google Sheet CSV 來源 ——
+  // 建議方式：在 Google 試算表「檔案 → 發佈到網路 → 以 CSV 發佈」取得 URL 後貼到下方。
+  // 也可用 gviz tqx=out:csv，如：
+  // https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/gviz/tq?tqx=out:csv&gid=GID
+  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSm1N887w7WR0yomqTz8820xw7k4vJN_FaH2rzrgcrSmpI4VQrselzdUXlvh8QAGs98pAqGnOPuSbzb/pub?gid=0&single=true&output=csv"; // ← 在這裡貼上你的 CSV 連結
+
+  // —— 欄位名稱（與你的表頭一致）——
+  const COL = {
+    ringId: "環號",
+    category: "類別",
+    size: "尺寸",
+    color: "顏色組合",
+    individual: "目前個體",   // Tooltip 與搜尋回覆
+    species: "目前物種",       // 分組標題
+    status: "狀態",           // 僅顯示「使用中」
+    place: "目前保存地點",
+    updated: "最後更新時間",
+    note: "備註"
+  };
+
+  // —— 簡單工具 ——
+  const $ = (sel, el=document) => el.querySelector(sel);
+  const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+  const elRoot = $("#root");
+  const elQ = $("#q");
+  const elSearch = $("#btnSearch");
+  const elClear = $("#btnClear");
+  const elResult = $("#searchResult");
+
+  // 儲存資料
+  let rows = [];
+  let indexByRing = new Map(); // 環號 → row
+  let mountMap = new Map(); // 環號 → 對應的 DOM 節點（用於搜尋高亮與捲動）
+
+  // 載入 CSV
+  window.addEventListener("DOMContentLoaded", async () => {
+    if (!SHEET_CSV_URL || SHEET_CSV_URL.includes("PUT_YOUR_PUBLISHED_CSV_URL_HERE")) {
+      elRoot.innerHTML = `<div class="species-card"><div class="species-meta">請先在程式中的 <code>SHEET_CSV_URL</code> 貼上你的 Google 試算表 CSV 連結。</div></div>`;
+      elRoot.setAttribute("aria-busy", "false");
+      bindSearch();
+      return;
+    }
+    try {
+      const csvText = await fetchCsv(SHEET_CSV_URL);
+      const parsed = Papa.parse(csvText, { header:true, skipEmptyLines:true });
+      // 清理鍵名左右空白
+      const normalized = parsed.data.map((r)=>{
+        const o={};
+        for (const k in r) { o[k.trim()] = (r[k] ?? "").toString().trim(); }
+        return o;
+      });
+      // 前置過濾：類別=色環 且 狀態=使用中
+      rows = normalized.filter(r => (r[COL.category]==="色環") && (r[COL.status]==="使用中"));
+      // 依物種分組
+      const groups = groupBy(rows, r => r[COL.species] || "未指派物種");
+      // 搜尋索引
+      indexByRing = new Map(rows.map(r => [r[COL.ringId], r]));
+      // 渲染
+      render(groups);
+      elRoot.setAttribute("aria-busy", "false");
+    } catch (err) {
+      console.error(err);
+      elRoot.innerHTML = `<div class="species-card"><div class="species-meta">讀取失敗：${escapeHtml(err.message || err)}</div></div>`;
+      elRoot.setAttribute("aria-busy", "false");
+    }
+    bindSearch();
+  });
+
+  async function fetchCsv(url){
+    const res = await fetch(url, { cache: "no-store" });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  }
+
+  function groupBy(arr, keyFn){
+    const m = new Map();
+    for(const it of arr){
+      const k = keyFn(it);
+      if(!m.has(k)) m.set(k, []);
+      m.get(k).push(it);
+    }
+    // 依物種名稱排序（本地語系）
+    return new Map([...m.entries()].sort((a,b)=>a[0].localeCompare(b[0])));
+  }
+
+  function render(groupMap){
+    elRoot.innerHTML = "";
+    mountMap.clear();
+    for(const [species, list] of groupMap.entries()){
+      list.sort((a,b)=> (a[COL.ringId]||"").localeCompare(b[COL.ringId]||""));
+      const card = document.createElement("section");
+      card.className = "species-card";
+      card.innerHTML = `
+        <div class="species-head">
+          <div class="species-title">物種：${escapeHtml(species)}</div>
+          <div class="species-meta">使用中：${list.length}</div>
+        </div>
+        <div class="pillars"></div>
+      `;
+      const grid = $(".pillars", card);
+      for(const r of list){
+        const ringId = r[COL.ringId] || "—";
+        const individual = r[COL.individual] || "—";
+        const div = document.createElement("button");
+        div.type = "button";
+        div.className = "pillar";
+        div.textContent = ringId;
+        div.setAttribute("data-individual", `個體：${individual}`);
+        div.setAttribute("data-ring", ringId);
+        div.setAttribute("title", individual ? `個體：${individual}` : "無個體資料");
+        grid.appendChild(div);
+        mountMap.set(ringId, div);
+      }
+      elRoot.appendChild(card);
+    }
+  }
+
+  function bindSearch(){
+    const onSearch = ()=>{
+      const q = (elQ.value||"").trim();
+      if(!q){ elResult.textContent = ""; clearHit(); return; }
+      const row = indexByRing.get(q);
+      if(row){
+        const indiv = row[COL.individual] || "—"; // 目前以「個體」當成你要的病歷編號顯示
+        elResult.innerHTML = `環號 <strong>${escapeHtml(q)}</strong> → 病歷編號 <strong>${escapeHtml(indiv)}</strong>`;
+        // 高亮 & 捲動
+        highlightAndScroll(q);
+      } else {
+        elResult.textContent = `找不到該環號：${q}`;
+        clearHit();
+      }
+    };
+    elSearch?.addEventListener("click", onSearch);
+    elClear?.addEventListener("click", ()=>{ elQ.value=""; elResult.textContent=""; clearHit(); elQ.focus(); });
+    elQ?.addEventListener("keydown", (e)=>{ if(e.key==="Enter"){ onSearch(); }});
+  }
+
+  function highlightAndScroll(ringId){
+    clearHit();
+    const el = mountMap.get(ringId);
+    if(!el) return;
+    el.setAttribute("data-hit","1");
+    el.scrollIntoView({behavior:"smooth", block:"center"});
+    // 3 秒後移除高亮
+    setTimeout(()=>{ if(el) el.removeAttribute("data-hit"); }, 3000);
+  }
+  function clearHit(){
+    $$(".pillar[data-hit='1']").forEach(el=>el.removeAttribute("data-hit"));
+  }
+
+  function escapeHtml(str){
+    return String(str).replace(/[&<>"']/g, s=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[s]));
+  }
+  </script>
+</body>
+</html>
