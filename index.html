@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>色環腳環查詢｜僅顯示使用中</title>
-  <meta name="description" content="從 Google 試算表讀取資料，顯示各物種目前使用中的色環。滑過顯示個體；可搜尋環號→回覆個體(病歷編號)。" />
+  <meta name="description" content="顯示各物種目前使用中的色環" />
   <!-- 使用系統字體，載入快 -->
   <style>
     :root{
@@ -36,7 +36,33 @@
     /* Ring Pillar 網格 */
     .pillars{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px}
     .pillar{background:var(--accent);color:var(--accentText);border-radius:10px;height:52px;display:flex;align-items:center;justify-content:center;font-weight:700;letter-spacing:.3px;position:relative;box-shadow:0 1px 0 rgba(0,0,0,.08);outline:none;border:1px solid rgba(0,0,0,.06)}
-    .pillar[data-hit="1"]{box-shadow:0 0 0 3px #1111; transform:scale(1.02);} /* 搜尋高亮 */
+    /* 搜尋高亮（取代原本的簡單外框） */
+    .pillar[data-hit="1"]{
+      outline:3px solid #111;
+      outline-offset:2px;
+      box-shadow:0 0 0 6px #1111;
+      transform:scale(1.04);
+      animation:pulseBorder .9s ease-in-out 2;
+    }
+    
+    /* 右上角「搜尋結果」徽章 */
+    .pillar .hit-badge{
+      position:absolute;
+      top:-8px; right:-8px;
+      background:#111; color:#fff;
+      font-size:10px; font-weight:700;
+      padding:3px 6px;
+      border-radius:999px;
+      box-shadow:0 2px 6px rgba(0,0,0,.2);
+    }
+    
+    /* 脈動動畫 */
+    @keyframes pulseBorder {
+      0%{box-shadow:0 0 0 0 #1110}
+      50%{box-shadow:0 0 0 8px #1112}
+      100%{box-shadow:0 0 0 0 #1110}
+    }
+
 
     /* Tooltip (顯示個體) */
     .pillar::after{content: attr(data-individual); position:absolute; bottom:60px; left:50%; transform:translateX(-50%); background:#111; color:#fff; padding:6px 8px; font-size:12px; border-radius:8px; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .12s ease; box-shadow:0 2px 10px rgba(0,0,0,.15)}
@@ -74,7 +100,7 @@
     <!-- 內容掛載點 -->
     <main id="root" aria-busy="true" aria-live="polite"></main>
 
-    <footer>© 2025 WildOne ｜ 本頁於重新整理時即與試算表同步（建議以「發布到網路」的 CSV 連結）</footer>
+    <footer>© 2025 WildOne ｜ 本頁於重新整理時即與試算表同步</footer>
   </div>
 
   <script>
@@ -219,13 +245,36 @@
     clearHit();
     const el = mountMap.get(ringId);
     if(!el) return;
+  
+    // 設定高亮
     el.setAttribute("data-hit","1");
+  
+    // 新增「搜尋結果」徽章（若已存在就不重複加）
+    let tag = el.querySelector(".hit-badge");
+    if(!tag){
+      tag = document.createElement("span");
+      tag.className = "hit-badge";
+      tag.textContent = "搜尋結果";
+      el.appendChild(tag);
+    }
+  
+    // 捲動到視窗中央
     el.scrollIntoView({behavior:"smooth", block:"center"});
-    // 3 秒後移除高亮
-    setTimeout(()=>{ if(el) el.removeAttribute("data-hit"); }, 3000);
+  
+    // 3 秒後移除高亮與徽章
+    setTimeout(()=>{ 
+      if(el){
+        el.removeAttribute("data-hit");
+        tag && tag.remove();
+      }
+    }, 3000);
   }
+  
   function clearHit(){
-    $$(".pillar[data-hit='1']").forEach(el=>el.removeAttribute("data-hit"));
+    $$(".pillar[data-hit='1']").forEach(el=>{
+      el.removeAttribute("data-hit");
+      el.querySelector(".hit-badge")?.remove();
+    });
   }
 
   function escapeHtml(str){
