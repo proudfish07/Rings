@@ -45,17 +45,6 @@
       animation:pulseBorder .9s ease-in-out 2;
     }
     
-    /* 右上角「搜尋結果」徽章 */
-    .pillar .hit-badge{
-      position:absolute;
-      top:-8px; right:-8px;
-      background:#111; color:#fff;
-      font-size:10px; font-weight:700;
-      padding:3px 6px;
-      border-radius:999px;
-      box-shadow:0 2px 6px rgba(0,0,0,.2);
-    }
-    
     /* 脈動動畫 */
     @keyframes pulseBorder {
       0%{box-shadow:0 0 0 0 #1110}
@@ -248,15 +237,6 @@
   
     // 設定高亮
     el.setAttribute("data-hit","1");
-  
-    // 新增「搜尋結果」徽章（若已存在就不重複加）
-    let tag = el.querySelector(".hit-badge");
-    if(!tag){
-      tag = document.createElement("span");
-      tag.className = "hit-badge";
-      tag.textContent = "搜尋結果";
-      el.appendChild(tag);
-    }
   
     // 捲動到視窗中央
     el.scrollIntoView({behavior:"smooth", block:"center"});
